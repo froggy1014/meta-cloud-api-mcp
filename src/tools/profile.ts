@@ -10,15 +10,24 @@ export function registerProfileTools(server: McpServer) {
         'Get the WhatsApp Business Profile — about, address, description, email, websites, profile picture URL',
         {
             fields: z
-                .array(z.string())
+                .array(
+                    z.enum([
+                        'about',
+                        'address',
+                        'description',
+                        'email',
+                        'messaging_product',
+                        'profile_picture_url',
+                        'websites',
+                        'vertical',
+                    ]),
+                )
                 .optional()
-                .describe(
-                    'Specific fields to retrieve (e.g. ["about", "address", "description", "email", "websites", "profile_picture_url", "vertical"])',
-                ),
+                .describe('Specific business profile fields to retrieve'),
         },
         async ({ fields }) => {
             try {
-                const result = await getClient().businessProfile.getBusinessProfile(fields as any);
+                const result = await getClient().businessProfile.getBusinessProfile(fields);
                 return formatSuccess(result);
             } catch (error) {
                 return formatError(error);

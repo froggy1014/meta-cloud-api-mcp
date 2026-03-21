@@ -10,15 +10,40 @@ export function registerPhoneNumberTools(server: McpServer) {
         'Get information about the configured WhatsApp Business phone number — display number, verified name, quality rating, status',
         {
             fields: z
-                .array(z.string())
+                .array(
+                    z.enum([
+                        'display_phone_number',
+                        'id',
+                        'quality_rating',
+                        'verified_name',
+                        'account_mode',
+                        'certificate',
+                        'code_verification_status',
+                        'conversational_automation',
+                        'eligibility_for_api_business_global_search',
+                        'health_status',
+                        'is_official_business_account',
+                        'is_on_biz_app',
+                        'is_pin_enabled',
+                        'is_preverified_number',
+                        'last_onboarded_time',
+                        'messaging_limit_tier',
+                        'name_status',
+                        'new_certificate',
+                        'new_name_status',
+                        'platform_type',
+                        'quality_score',
+                        'search_visibility',
+                        'status',
+                        'throughput',
+                    ]),
+                )
                 .optional()
-                .describe(
-                    'Specific fields to retrieve (e.g. ["display_phone_number", "verified_name", "quality_rating", "platform_type", "status"])',
-                ),
+                .describe('Specific phone number fields to retrieve'),
         },
         async ({ fields }) => {
             try {
-                const result = await getClient().phoneNumbers.getPhoneNumberById(fields as any);
+                const result = await getClient().phoneNumbers.getPhoneNumberById(fields);
                 return formatSuccess(result);
             } catch (error) {
                 return formatError(error);

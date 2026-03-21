@@ -10,15 +10,29 @@ export function registerWabaTools(server: McpServer) {
         'Get WhatsApp Business Account information — name, status, health, verification, messaging limits',
         {
             fields: z
-                .array(z.string())
+                .array(
+                    z.enum([
+                        'id',
+                        'name',
+                        'timezone_id',
+                        'account_review_status',
+                        'auth_international_rate_eligibility',
+                        'business_verification_status',
+                        'country',
+                        'currency',
+                        'health_status',
+                        'status',
+                        'ownership_type',
+                        'message_template_namespace',
+                        'primary_business_location',
+                    ]),
+                )
                 .optional()
-                .describe(
-                    'Specific fields to retrieve (e.g. ["id", "name", "status", "health_status", "business_verification_status"])',
-                ),
+                .describe('Specific WABA account fields to retrieve'),
         },
         async ({ fields }) => {
             try {
-                const result = await getClient().waba.getWabaAccount(fields as any);
+                const result = await getClient().waba.getWabaAccount(fields);
                 return formatSuccess(result);
             } catch (error) {
                 return formatError(error);
