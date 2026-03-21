@@ -25,6 +25,15 @@ export function registerWabaTools(server: McpServer) {
                         'ownership_type',
                         'message_template_namespace',
                         'primary_business_location',
+                        'analytics',
+                        'is_enabled_for_insights',
+                        'is_shared_with_partners',
+                        'marketing_messages_lite_api_status',
+                        'marketing_messages_onboarding_status',
+                        'on_behalf_of_business_info',
+                        'primary_funding_id',
+                        'purchase_order_number',
+                        'whatsapp_business_manager_messaging_limit',
                     ]),
                 )
                 .optional()
@@ -32,7 +41,7 @@ export function registerWabaTools(server: McpServer) {
         },
         async ({ fields }) => {
             try {
-                const result = await getClient().waba.getWabaAccount(fields);
+                const result = await getClient().waba.getWabaAccount(fields as any);
                 return formatSuccess(result);
             } catch (error) {
                 return formatError(error);
