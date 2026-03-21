@@ -21,9 +21,9 @@
 
 This MCP server wraps the [meta-cloud-api](https://github.com/froggy1014/meta-cloud-api) SDK, giving Claude (and other MCP-compatible clients) direct access to the WhatsApp Business Platform. You can ask Claude to:
 
-- **"Create a welcome template in Korean and English"**
+- **"Create a welcome template in English and Spanish"**
 - **"List all my flows and publish the draft one"**
-- **"Send a template message to +82-10-1234-5678"**
+- **"Send a template message to +1-555-123-4567"**
 - **"Update my business profile description"**
 
 ## Quick Start
@@ -150,7 +150,7 @@ claude mcp add whatsapp -- npx -y meta-cloud-api-mcp
 **Managing Templates:**
 > "List all my approved marketing templates"
 >
-> "Create a template called `order_update` in Korean with a body that says '주문이 확인되었습니다. 주문번호: {{1}}'"
+> "Create a template called `order_update` with a body that says 'Your order has been confirmed. Order number: {{1}}'"
 >
 > "Delete the `old_promo` template"
 
@@ -164,9 +164,9 @@ claude mcp add whatsapp -- npx -y meta-cloud-api-mcp
 > "Publish flow 12345"
 
 **Sending Messages:**
-> "Send 'Hello!' to +821012345678"
+> "Send 'Hello!' to +15551234567"
 >
-> "Send the `hello_world` template in English to +821012345678"
+> "Send the `hello_world` template in English to +15551234567"
 
 ## Development
 
