@@ -41,7 +41,7 @@ export function registerWabaTools(server: McpServer) {
         },
         async ({ fields }) => {
             try {
-                const result = await getClient().waba.getWabaAccount(fields as any);
+                const result = await getClient().waba.getWabaAccount(fields);
                 return formatSuccess(result);
             } catch (error) {
                 return formatError(error);

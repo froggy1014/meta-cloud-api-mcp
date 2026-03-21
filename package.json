@@ -26,7 +26,7 @@
     "license": "MIT",
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.12.1",
-        "meta-cloud-api": "^2.0.1",
+        "meta-cloud-api": "^2.1.0",
         "zod": "^3.24.0"
     },
     "devDependencies": {
