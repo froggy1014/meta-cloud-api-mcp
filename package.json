@@ -1,6 +1,6 @@
 {
     "name": "meta-cloud-api-mcp",
-    "version": "0.2.0",
+    "version": "1.0.0",
     "description": "MCP server for WhatsApp Cloud API - manage templates, flows, and send messages via Claude",
     "type": "module",
     "main": "./dist/index.js",
