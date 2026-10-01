@@ -1,107 +1,69 @@
+// Docs: https://developers.facebook.com/documentation/business-messaging/whatsapp/business-phone-numbers/phone-numbers/
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { getClient } from '../client.js';
-import { formatError } from '../utils/errors.js';
-import { formatSuccess } from '../utils/response.js';
+import type { ToolContext } from '../context.js';
+import { defineTool, READ_ONLY, WRITE } from './define.js';
 
-export function registerPhoneNumberTools(server: McpServer) {
-    server.tool(
-        'get_phone_number',
-        'Get information about the configured WhatsApp Business phone number — display number, verified name, quality rating, status',
-        {
-            fields: z
-                .array(
-                    z.enum([
-                        'display_phone_number',
-                        'id',
-                        'quality_rating',
-                        'verified_name',
-                        'account_mode',
-                        'certificate',
-                        'code_verification_status',
-                        'conversational_automation',
-                        'eligibility_for_api_business_global_search',
-                        'health_status',
-                        'is_official_business_account',
-                        'is_on_biz_app',
-                        'is_pin_enabled',
-                        'is_preverified_number',
-                        'last_onboarded_time',
-                        'messaging_limit_tier',
-                        'name_status',
-                        'new_certificate',
-                        'new_name_status',
-                        'platform_type',
-                        'quality_score',
-                        'search_visibility',
-                        'status',
-                        'throughput',
-                    ]),
-                )
-                .optional()
-                .describe('Specific phone number fields to retrieve'),
-        },
-        async ({ fields }) => {
-            try {
-                const result = await getClient().phoneNumbers.getPhoneNumberById(fields);
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
-        },
+const fields = z
+    .array(z.string().regex(/^[a-z_]+$/))
+    .min(1)
+    .optional()
+    .describe(
+        'Fields to return, e.g. ["display_phone_number","verified_name","quality_rating","status","messaging_limit_tier","throughput"]',
     );
 
-    server.tool(
-        'list_phone_numbers',
-        'List all phone numbers associated with the WhatsApp Business Account',
-        {},
-        async () => {
-            try {
-                const result = await getClient().phoneNumbers.getPhoneNumbers();
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
+export function registerPhoneNumberTools(server: McpServer, ctx: ToolContext): void {
+    defineTool(server, ctx, {
+        name: 'list_phone_numbers',
+        title: 'List phone numbers',
+        description: 'List the phone numbers registered in the WhatsApp Business Account.',
+        input: {
+            fields,
+            limit: z.number().int().min(1).max(100).optional().describe('Page size'),
+            after: z.string().min(1).optional().describe('Pagination cursor from a previous response'),
         },
-    );
+        annotations: READ_ONLY,
+        run: ({ fields: f, limit, after }, c) => {
+            c.getBusinessAccountId();
+            return c.getClient().phoneNumbers.getPhoneNumbers({
+                ...(f && { fields: f as never }),
+                ...(limit && { limit }),
+                ...(after && { after }),
+            });
+        },
+    });
 
-    server.tool(
-        'request_verification_code',
-        'Request a verification code for the WhatsApp Business phone number via SMS or voice call',
-        {
-            code_method: z
-                .enum(['SMS', 'VOICE'])
-                .describe('Delivery method for the verification code'),
-            language: z
-                .string()
-                .describe('Language code for the verification message (e.g. "en_US", "ko_KR")'),
-        },
-        async ({ code_method, language }) => {
-            try {
-                const result = await getClient().phoneNumbers.requestVerificationCode({
-                    code_method,
-                    language,
-                } as any);
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
-        },
-    );
+    defineTool(server, ctx, {
+        name: 'get_phone_number',
+        title: 'Get phone number',
+        description:
+            'Get details of the configured sender number (WA_PHONE_NUMBER_ID): display number, verified name, quality rating, status, limits.',
+        input: { fields },
+        annotations: READ_ONLY,
+        run: ({ fields: f }, c) => c.getClient().phoneNumbers.getPhoneNumberById(f as never),
+    });
 
-    server.tool(
-        'verify_phone_code',
-        'Verify the WhatsApp Business phone number with the code received via SMS or voice call',
-        {
-            code: z.string().describe('6-digit verification code'),
+    defineTool(server, ctx, {
+        name: 'request_verification_code',
+        title: 'Request verification code',
+        description: 'Request a phone number verification code by SMS or voice call.',
+        input: {
+            code_method: z.enum(['SMS', 'VOICE']).describe('Delivery method'),
+            language: z.string().min(2).describe('Language of the message, e.g. "en_US"'),
         },
-        async ({ code }) => {
-            try {
-                const result = await getClient().phoneNumbers.verifyCode({ code } as any);
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
+        annotations: WRITE,
+        run: ({ code_method, language }, c) =>
+            c.getClient().phoneNumbers.requestVerificationCode({ code_method, language } as never),
+    });
+
+    defineTool(server, ctx, {
+        name: 'verify_phone_code',
+        title: 'Verify phone code',
+        description: 'Verify the configured phone number with the code received by SMS or voice.',
+        input: {
+            code: z.string().regex(/^\d{6}$/, 'Expected a 6-digit code').describe('6-digit verification code'),
         },
-    );
+        annotations: WRITE,
+        run: ({ code }, c) => c.getClient().phoneNumbers.verifyCode({ code }),
+    });
 }

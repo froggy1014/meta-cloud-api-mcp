@@ -1,10 +1,11 @@
+// Docs: https://developers.facebook.com/documentation/business-messaging/whatsapp/flows/
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { getClient, getWabaId } from '../client.js';
-import { formatError } from '../utils/errors.js';
-import { formatSuccess } from '../utils/response.js';
+import type { ToolContext } from '../context.js';
+import { ToolInputError } from '../result.js';
+import { DESTRUCTIVE, defineTool, READ_ONLY, WRITE } from './define.js';
 
-const FlowCategoryEnum = z.enum([
+const FlowCategory = z.enum([
     'SIGN_UP',
     'SIGN_IN',
     'APPOINTMENT_BOOKING',
@@ -15,187 +16,126 @@ const FlowCategoryEnum = z.enum([
     'OTHER',
 ]);
 
-export function registerFlowTools(server: McpServer) {
-    server.tool(
-        'list_flows',
-        'List all WhatsApp Flows for a WhatsApp Business Account',
-        {
-            waba_id: z
-                .string()
-                .optional()
-                .describe(
-                    'WhatsApp Business Account ID (defaults to WA_BUSINESS_ACCOUNT_ID env var)',
-                ),
-        },
-        async ({ waba_id }) => {
-            try {
-                const id = waba_id || getWabaId();
-                const result = await getClient().flows.listFlows(id);
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
-        },
-    );
+const wabaId = z.string().regex(/^\d+$/).optional().describe('WABA ID (defaults to WA_BUSINESS_ACCOUNT_ID)');
+const flowId = z.string().min(1).describe('Flow ID');
 
-    server.tool(
-        'get_flow',
-        'Get details of a WhatsApp Flow by ID, including status, categories, and validation errors',
-        {
-            flow_id: z.string().describe('The Flow ID to retrieve'),
+function parseFlowJson(value: string | Record<string, unknown>): Record<string, unknown> {
+    if (typeof value !== 'string') return value;
+    try {
+        return JSON.parse(value) as Record<string, unknown>;
+    } catch {
+        throw new ToolInputError('flow_json is not valid JSON.');
+    }
+}
+
+export function registerFlowTools(server: McpServer, ctx: ToolContext): void {
+    defineTool(server, ctx, {
+        name: 'list_flows',
+        title: 'List flows',
+        description: 'List WhatsApp Flows in the WhatsApp Business Account.',
+        input: { waba_id: wabaId },
+        annotations: READ_ONLY,
+        run: ({ waba_id }, c) => c.getClient().flows.listFlows(waba_id ?? c.getBusinessAccountId()),
+    });
+
+    defineTool(server, ctx, {
+        name: 'get_flow',
+        title: 'Get flow',
+        description: 'Get a Flow by ID, including status, categories and validation errors.',
+        input: {
+            flow_id: flowId,
             fields: z
                 .string()
                 .optional()
-                .describe(
-                    'Comma-separated fields to return (e.g. "id,name,status,categories,validation_errors")',
-                ),
+                .describe('Comma-separated fields, e.g. "id,name,status,categories,validation_errors"'),
         },
-        async ({ flow_id, fields }) => {
-            try {
-                const result = await getClient().flows.getFlow(flow_id, fields);
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
-        },
-    );
+        annotations: READ_ONLY,
+        run: ({ flow_id, fields }, c) => c.getClient().flows.getFlow(flow_id, fields),
+    });
 
-    server.tool(
-        'create_flow',
-        'Create a new WhatsApp Flow. Optionally provide flow_json inline or clone from an existing flow.',
-        {
-            name: z.string().describe('Flow name'),
-            waba_id: z
-                .string()
-                .optional()
-                .describe('WABA ID (defaults to WA_BUSINESS_ACCOUNT_ID env var)'),
-            categories: z
-                .array(FlowCategoryEnum)
-                .optional()
-                .describe('Flow categories'),
-            endpoint_uri: z
-                .string()
-                .optional()
-                .describe('Endpoint URI for the flow data exchange'),
-            clone_flow_id: z.string().optional().describe('Flow ID to clone from'),
+    defineTool(server, ctx, {
+        name: 'create_flow',
+        title: 'Create flow',
+        description: 'Create a Flow, optionally from inline Flow JSON or by cloning another Flow.',
+        input: {
+            name: z.string().min(1).describe('Flow name'),
+            waba_id: wabaId,
+            categories: z.array(FlowCategory).min(1).optional().describe('Flow categories'),
+            endpoint_uri: z.url().optional().describe('Data exchange endpoint URL'),
+            clone_flow_id: z.string().min(1).optional().describe('Flow ID to clone'),
+            flow_json: z.string().min(1).optional().describe('Flow JSON as a string'),
+            publish: z.boolean().optional().describe('Publish right after creation'),
+        },
+        annotations: WRITE,
+        run: (p, c) =>
+            c.getClient().flows.createFlow(p.waba_id ?? c.getBusinessAccountId(), {
+                name: p.name,
+                ...(p.categories && { categories: p.categories as never }),
+                ...(p.endpoint_uri && { endpoint_uri: p.endpoint_uri }),
+                ...(p.clone_flow_id && { clone_flow_id: p.clone_flow_id }),
+                ...(p.flow_json && { flow_json: p.flow_json }),
+                ...(p.publish !== undefined && { publish: p.publish }),
+            }),
+    });
+
+    defineTool(server, ctx, {
+        name: 'update_flow_metadata',
+        title: 'Update flow metadata',
+        description: 'Update a Flow’s name, categories or endpoint URL.',
+        input: {
+            flow_id: flowId,
+            name: z.string().min(1).optional(),
+            categories: z.array(FlowCategory).min(1).optional(),
+            endpoint_uri: z.url().optional(),
+        },
+        annotations: { ...WRITE, idempotentHint: true },
+        run: ({ flow_id, name, categories, endpoint_uri }, c) =>
+            c.getClient().flows.updateFlowMetadata(flow_id, {
+                ...(name && { name }),
+                ...(categories && { categories: categories as never }),
+                ...(endpoint_uri && { endpoint_uri }),
+            }),
+    });
+
+    defineTool(server, ctx, {
+        name: 'update_flow_json',
+        title: 'Update flow JSON',
+        description: 'Upload a new Flow JSON definition to a DRAFT Flow. Returns validation errors if any.',
+        input: {
+            flow_id: flowId,
             flow_json: z
-                .string()
-                .optional()
-                .describe('Flow JSON definition as a string'),
-            publish: z.boolean().optional().describe('Publish immediately after creation'),
+                .union([z.string().min(1), z.record(z.string(), z.unknown())])
+                .describe('Flow JSON (string or object)'),
         },
-        async (params) => {
-            try {
-                const wabaId = params.waba_id || getWabaId();
-                const result = await getClient().flows.createFlow(wabaId, {
-                    name: params.name,
-                    ...(params.categories && { categories: params.categories as any }),
-                    ...(params.endpoint_uri && { endpoint_uri: params.endpoint_uri }),
-                    ...(params.clone_flow_id && { clone_flow_id: params.clone_flow_id }),
-                    ...(params.flow_json && { flow_json: params.flow_json }),
-                    ...(params.publish !== undefined && { publish: params.publish }),
-                });
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
-        },
-    );
+        annotations: { ...WRITE, idempotentHint: true },
+        run: ({ flow_id, flow_json }, c) =>
+            c.getClient().flows.updateFlowJson(flow_id, { file: parseFlowJson(flow_json) }),
+    });
 
-    server.tool(
-        'update_flow_metadata',
-        'Update metadata of an existing WhatsApp Flow (name, categories, endpoint URI)',
-        {
-            flow_id: z.string().describe('The Flow ID to update'),
-            name: z.string().optional().describe('New flow name'),
-            categories: z
-                .array(FlowCategoryEnum)
-                .optional()
-                .describe('Updated flow categories'),
-            endpoint_uri: z.string().optional().describe('Updated endpoint URI'),
-        },
-        async ({ flow_id, name, categories, endpoint_uri }) => {
-            try {
-                const result = await getClient().flows.updateFlowMetadata(flow_id, {
-                    ...(name && { name }),
-                    ...(categories && { categories: categories as any }),
-                    ...(endpoint_uri && { endpoint_uri }),
-                });
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
-        },
-    );
+    defineTool(server, ctx, {
+        name: 'publish_flow',
+        title: 'Publish flow',
+        description: 'Publish a DRAFT Flow. Published Flows can no longer be edited.',
+        input: { flow_id: flowId },
+        annotations: WRITE,
+        run: ({ flow_id }, c) => c.getClient().flows.publishFlow(flow_id),
+    });
 
-    server.tool(
-        'update_flow_json',
-        'Upload or update the Flow JSON definition for a WhatsApp Flow. Accepts JSON as a string or object.',
-        {
-            flow_id: z.string().describe('The Flow ID to update'),
-            flow_json: z
-                .union([z.string(), z.record(z.any())])
-                .describe('Flow JSON definition (string or object)'),
-        },
-        async ({ flow_id, flow_json }) => {
-            try {
-                const jsonObj =
-                    typeof flow_json === 'string' ? JSON.parse(flow_json) : flow_json;
-                const result = await getClient().flows.updateFlowJson(flow_id, {
-                    file: jsonObj,
-                });
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
-        },
-    );
+    defineTool(server, ctx, {
+        name: 'deprecate_flow',
+        title: 'Deprecate flow',
+        description: 'Deprecate a PUBLISHED Flow so it can no longer be sent. Irreversible.',
+        input: { flow_id: flowId },
+        annotations: DESTRUCTIVE,
+        run: ({ flow_id }, c) => c.getClient().flows.deprecateFlow(flow_id),
+    });
 
-    server.tool(
-        'delete_flow',
-        'Delete a WhatsApp Flow. Only DRAFT flows can be deleted.',
-        {
-            flow_id: z.string().describe('The Flow ID to delete'),
-        },
-        async ({ flow_id }) => {
-            try {
-                const result = await getClient().flows.deleteFlow(flow_id);
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
-        },
-    );
-
-    server.tool(
-        'publish_flow',
-        'Publish a DRAFT WhatsApp Flow. Once published, the flow JSON cannot be modified.',
-        {
-            flow_id: z.string().describe('The Flow ID to publish'),
-        },
-        async ({ flow_id }) => {
-            try {
-                const result = await getClient().flows.publishFlow(flow_id);
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
-        },
-    );
-
-    server.tool(
-        'deprecate_flow',
-        'Deprecate a PUBLISHED WhatsApp Flow. This is irreversible — the flow can no longer be used.',
-        {
-            flow_id: z.string().describe('The Flow ID to deprecate'),
-        },
-        async ({ flow_id }) => {
-            try {
-                const result = await getClient().flows.deprecateFlow(flow_id);
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
-        },
-    );
+    defineTool(server, ctx, {
+        name: 'delete_flow',
+        title: 'Delete flow',
+        description: 'Delete a DRAFT Flow. Irreversible.',
+        input: { flow_id: flowId },
+        annotations: DESTRUCTIVE,
+        run: ({ flow_id }, c) => c.getClient().flows.deleteFlow(flow_id),
+    });
 }

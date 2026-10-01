@@ -1,44 +1,32 @@
+// Docs: https://developers.facebook.com/documentation/business-messaging/whatsapp/business-phone-numbers/registration/
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { getClient } from '../client.js';
-import { formatError } from '../utils/errors.js';
-import { formatSuccess } from '../utils/response.js';
+import type { ToolContext } from '../context.js';
+import { DESTRUCTIVE, defineTool, WRITE } from './define.js';
 
-export function registerRegistrationTools(server: McpServer) {
-    server.tool(
-        'register_phone',
-        'Register a WhatsApp Business phone number with a 6-digit PIN',
-        {
-            pin: z.string().describe('6-digit registration PIN'),
+export function registerRegistrationTools(server: McpServer, ctx: ToolContext): void {
+    defineTool(server, ctx, {
+        name: 'register_phone',
+        title: 'Register phone number',
+        description: 'Register the configured phone number for Cloud API use with a 6-digit two-step verification PIN.',
+        input: {
+            pin: z.string().regex(/^\d{6}$/, 'Expected a 6-digit PIN').describe('6-digit PIN'),
             data_localization_region: z
                 .enum(['AU', 'BR', 'DE', 'ID', 'IN', 'JP', 'KR', 'SG', 'ZA'])
                 .optional()
-                .describe('Data localization region for storage compliance'),
+                .describe('Optional local storage region'),
         },
-        async ({ pin, data_localization_region }) => {
-            try {
-                const result = await getClient().registration.register(
-                    pin,
-                    data_localization_region as any,
-                );
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
-        },
-    );
+        annotations: WRITE,
+        run: ({ pin, data_localization_region }, c) =>
+            c.getClient().registration.register(pin, data_localization_region as never),
+    });
 
-    server.tool(
-        'deregister_phone',
-        'Deregister a WhatsApp Business phone number',
-        {},
-        async () => {
-            try {
-                const result = await getClient().registration.deregister();
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
-        },
-    );
+    defineTool(server, ctx, {
+        name: 'deregister_phone',
+        title: 'Deregister phone number',
+        description: 'Deregister the configured phone number. It stops sending and receiving messages.',
+        input: {},
+        annotations: DESTRUCTIVE,
+        run: (_args, c) => c.getClient().registration.deregister(),
+    });
 }
