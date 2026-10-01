@@ -1,31 +1,18 @@
 #!/usr/bin/env node
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { registerFlowTools } from './tools/flows.js';
-import { registerMediaTools } from './tools/media.js';
-import { registerMessageTools } from './tools/messages.js';
-import { registerPhoneNumberTools } from './tools/phoneNumbers.js';
-import { registerProfileTools } from './tools/profile.js';
-import { registerRegistrationTools } from './tools/registration.js';
-import { registerTemplateTools } from './tools/templates.js';
-import { registerWabaTools } from './tools/waba.js';
+// stdout carries the MCP JSON-RPC stream. Anything else written there corrupts it,
+// so route console output from dependencies to stderr before they load.
+for (const method of ['log', 'info', 'debug'] as const) {
+    console[method] = (...args: unknown[]) => console.error(...args);
+}
 
-const server = new McpServer({
-    name: 'whatsapp-cloud-api',
-    version: '0.2.0',
-    description:
-        'MCP server for WhatsApp Cloud API — manage templates, flows, media, profiles, phone numbers, and send messages',
+// meta-cloud-api's debug logger prints request details and a token prefix when
+// DEBUG=true. Never enable it inside the MCP server.
+delete process.env.DEBUG;
+
+const { main } = await import('./server.js');
+
+main().catch((error: unknown) => {
+    console.error('meta-cloud-api-mcp failed to start:', error instanceof Error ? error.message : error);
+    process.exit(1);
 });
-
-registerTemplateTools(server);
-registerFlowTools(server);
-registerMessageTools(server);
-registerMediaTools(server);
-registerProfileTools(server);
-registerWabaTools(server);
-registerRegistrationTools(server);
-registerPhoneNumberTools(server);
-
-const transport = new StdioServerTransport();
-await server.connect(transport);

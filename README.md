@@ -5,12 +5,13 @@
 <h1 align="center">Meta Cloud API MCP Server</h1>
 
 <p align="center">
-  A Model Context Protocol (MCP) server that lets Claude manage WhatsApp templates, flows, and send messages through the WhatsApp Cloud API.
+  A Model Context Protocol (MCP) server that lets Claude, Cursor and other MCP clients send WhatsApp messages and manage templates, media, flows and the business profile through the WhatsApp Cloud API.
 </p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/meta-cloud-api-mcp"><img src="https://img.shields.io/npm/v/meta-cloud-api-mcp.svg" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/meta-cloud-api"><img src="https://img.shields.io/badge/SDK-meta--cloud--api-blue" alt="SDK"></a>
+  <a href="https://github.com/froggy1014/meta-cloud-api-mcp/actions/workflows/ci.yml"><img src="https://github.com/froggy1014/meta-cloud-api-mcp/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-compatible-brightgreen" alt="MCP Compatible"></a>
   <a href="https://github.com/froggy1014/meta-cloud-api-mcp/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
 </p>
@@ -19,34 +20,54 @@
 
 ## What is this?
 
-This MCP server wraps the [meta-cloud-api](https://github.com/froggy1014/meta-cloud-api) SDK, giving Claude (and other MCP-compatible clients) direct access to the WhatsApp Business Platform. You can ask Claude to:
+This server wraps the [meta-cloud-api](https://github.com/froggy1014/meta-cloud-api) SDK (v3.8+) and exposes it as MCP tools over stdio. Once connected you can ask your assistant things like:
 
-- **"Create a welcome template in English and Spanish"**
-- **"List all my flows and publish the draft one"**
-- **"Send a template message to +1-555-123-4567"**
-- **"Update my business profile description"**
+- "Send the `order_update` template in English to +1 415 555 2671 with order number 4821"
+- "Send a message to +14155552671 with Yes / No buttons asking to confirm tomorrow's appointment"
+- "Upload `~/Desktop/menu.pdf` and send it as a document"
+- "List my approved marketing templates"
+- "What is the quality rating of our phone number?"
 
-## Quick Start
+## Requirements
 
-### 1. Install
+- Node.js 20.12 or later
+- A Meta app with the WhatsApp product, and a WhatsApp Business Account
+- An MCP client (Claude Desktop, Claude Code, Cursor, ...)
+
+## Environment variables
+
+| Variable | Required | Where to find it |
+|----------|----------|------------------|
+| `CLOUD_API_ACCESS_TOKEN` | yes | App Dashboard > WhatsApp > API Setup (use a System User token for anything long-lived) |
+| `WA_PHONE_NUMBER_ID` | yes | App Dashboard > WhatsApp > API Setup > Phone number ID |
+| `WA_BUSINESS_ACCOUNT_ID` | for template, phone-number list, WABA and flow tools | App Dashboard > WhatsApp > API Setup > WhatsApp Business Account ID |
+| `CLOUD_API_VERSION` | no | Graph API version, e.g. `v23.0` (defaults to the SDK's version) |
+
+The server starts without credentials so clients can list its tools; a tool call then returns a `ConfigError` naming the missing variable. The access token is never logged, and is redacted from tool output (Meta sometimes echoes it back in error messages). `DEBUG` is ignored on purpose, because the SDK's debug logger prints part of the token.
+
+## Install
+
+There is nothing to install globally: MCP clients run the server with `npx`.
 
 ```bash
-npm install -g meta-cloud-api-mcp
+npx -y meta-cloud-api-mcp   # speaks MCP on stdin/stdout; normally launched by your client
 ```
 
-### 2. Get Your Credentials
+### Claude Code
 
-You need three values from the [Meta Developer Portal](https://developers.facebook.com/):
+```bash
+claude mcp add whatsapp \
+  -e CLOUD_API_ACCESS_TOKEN=your_access_token \
+  -e WA_PHONE_NUMBER_ID=your_phone_number_id \
+  -e WA_BUSINESS_ACCOUNT_ID=your_waba_id \
+  -- npx -y meta-cloud-api-mcp
+```
 
-| Variable | Where to find it |
-|----------|-----------------|
-| `CLOUD_API_ACCESS_TOKEN` | App Dashboard > WhatsApp > API Setup |
-| `WA_PHONE_NUMBER_ID` | App Dashboard > WhatsApp > API Setup > Phone number ID |
-| `WA_BUSINESS_ACCOUNT_ID` | App Dashboard > WhatsApp > API Setup > WhatsApp Business Account ID |
+Add `--scope user` to make it available in every project, or `--scope project` to write a shareable `.mcp.json` (keep real tokens out of version control). Check it with `claude mcp list` or `/mcp` inside Claude Code.
 
-### 3. Configure Claude Desktop
+### Claude Desktop
 
-Add to your `claude_desktop_config.json`:
+Settings > Developer > Edit Config, then add to `claude_desktop_config.json` and restart Claude Desktop:
 
 ```json
 {
@@ -57,116 +78,110 @@ Add to your `claude_desktop_config.json`:
       "env": {
         "CLOUD_API_ACCESS_TOKEN": "your_access_token",
         "WA_PHONE_NUMBER_ID": "your_phone_number_id",
-        "WA_BUSINESS_ACCOUNT_ID": "your_business_account_id"
+        "WA_BUSINESS_ACCOUNT_ID": "your_waba_id"
       }
     }
   }
 }
 ```
 
-### 4. Configure Claude Code
+### Cursor
 
-```bash
-claude mcp add whatsapp -- npx -y meta-cloud-api-mcp
+Add to `~/.cursor/mcp.json` (all projects) or `.cursor/mcp.json` (one project):
 
-# Then set environment variables in your .claude/settings.json
+```json
+{
+  "mcpServers": {
+    "whatsapp": {
+      "command": "npx",
+      "args": ["-y", "meta-cloud-api-mcp"],
+      "env": {
+        "CLOUD_API_ACCESS_TOKEN": "your_access_token",
+        "WA_PHONE_NUMBER_ID": "your_phone_number_id",
+        "WA_BUSINESS_ACCOUNT_ID": "your_waba_id"
+      }
+    }
+  }
+}
 ```
 
-## Available Tools (31)
+Any other stdio MCP client works the same way: command `npx`, args `["-y", "meta-cloud-api-mcp"]`, plus the env vars above.
 
-### Templates (5 tools)
+## Tools (34)
 
-| Tool | Description |
-|------|-------------|
-| `list_templates` | List templates with filters (name, status, category, language) |
-| `get_template` | Get a single template by ID with full component definition |
-| `create_template` | Create a new message template (MARKETING, UTILITY, AUTHENTICATION) |
-| `update_template` | Update template components (resubmits for review) |
-| `delete_template` | Delete a template by name or specific language version |
+Every tool validates its input with zod before calling Meta, and is annotated as read-only, write or destructive so clients can ask for confirmation. Failures come back as `isError` results with the SDK error class (`WhatsAppAuthorizationError`, `WhatsAppSendMessageError`, `WhatsAppThrottlingError`, ...), Meta's error code, `fbtrace_id`, and a hint for common cases such as an expired token or the 24-hour window.
 
-### Flows (8 tools)
+### Messages
+
+Free-form messages only reach users who wrote to you in the last 24 hours. Outside that window, send a template.
 
 | Tool | Description |
 |------|-------------|
-| `list_flows` | List all flows for your WhatsApp Business Account |
-| `get_flow` | Get flow details including status and validation errors |
-| `create_flow` | Create a new flow (optionally with inline JSON or clone) |
-| `update_flow_metadata` | Update flow name, categories, or endpoint URI |
-| `update_flow_json` | Upload or update the flow JSON definition |
-| `delete_flow` | Delete a draft flow |
-| `publish_flow` | Publish a draft flow (makes it live) |
-| `deprecate_flow` | Deprecate a published flow (irreversible) |
+| `send_text_message` | Send a text message (optional link preview, optional quoted reply) |
+| `send_template_message` | Send an approved template with variable components |
+| `send_media_message` | Send an image, video, audio, document or sticker by `media_id` or public `link` |
+| `send_interactive_buttons` | Send up to 3 quick-reply buttons with optional header and footer |
+| `send_interactive_list` | Send a list menu (up to 10 rows across sections) |
+| `mark_as_read` | Mark an incoming message as read, optionally with a typing indicator |
 
-### Messages (3 tools)
+### Templates
 
 | Tool | Description |
 |------|-------------|
-| `send_text_message` | Send a text message to a phone number |
-| `send_template_message` | Send a pre-approved template message |
-| `send_image_message` | Send an image (by media ID or public URL) |
+| `list_templates` | List templates, filtered by name, status, category or language |
+| `get_template` | Get one template with its components |
+| `create_template` | Create a template and submit it for review |
+| `update_template` | Edit components or category (re-submits for review) |
+| `delete_template` | Delete a template, or one language version via `hsm_id` |
 
-### Media (4 tools)
-
-| Tool | Description |
-|------|-------------|
-| `get_media_info` | Get media metadata (URL, MIME type, size, hash) |
-| `upload_media` | Upload a file to WhatsApp (returns media ID) |
-| `delete_media` | Delete media from WhatsApp servers |
-| `download_media` | Download media content to a local file |
-
-### Business Profile (2 tools)
+### Media
 
 | Tool | Description |
 |------|-------------|
-| `get_business_profile` | Get profile (about, address, email, websites, etc.) |
-| `update_business_profile` | Update profile fields |
+| `upload_media` | Upload a local file and get a media ID |
+| `get_media_url` | Get the download URL, MIME type, size and hash of a media ID |
+| `download_media` | Download media from that URL to a local file |
+| `delete_media` | Delete uploaded media |
 
-### WABA (3 tools)
-
-| Tool | Description |
-|------|-------------|
-| `get_waba_account` | Get account info (status, health, verification, limits) |
-| `subscribe_waba_webhook` | Subscribe to WABA webhooks with optional callback override |
-| `unsubscribe_waba_webhook` | Unsubscribe from WABA webhooks |
-
-### Phone Numbers (4 tools)
+### Business profile and phone numbers
 
 | Tool | Description |
 |------|-------------|
-| `get_phone_number` | Get phone number info (display number, quality, status) |
-| `list_phone_numbers` | List all phone numbers in the WABA |
-| `request_verification_code` | Request verification code via SMS or voice |
-| `verify_phone_code` | Verify phone number with received code |
+| `get_business_profile` | Get about, address, description, email, websites, vertical, picture |
+| `update_business_profile` | Update any of those fields |
+| `list_phone_numbers` | List phone numbers in the WABA |
+| `get_phone_number` | Get details of the configured sender number |
+| `request_verification_code` | Request a verification code by SMS or voice |
+| `verify_phone_code` | Verify the number with the received code |
+| `register_phone` | Register the number with a 6-digit PIN |
+| `deregister_phone` | Deregister the number |
 
-### Registration (2 tools)
+### WhatsApp Business Account
 
 | Tool | Description |
 |------|-------------|
-| `register_phone` | Register a phone number with a 6-digit PIN |
-| `deregister_phone` | Deregister a phone number |
+| `get_waba_account` | Get account status, review and verification status, limits |
+| `subscribe_waba_webhook` | Subscribe your app to WABA webhooks (optional callback override) |
+| `unsubscribe_waba_webhook` | Unsubscribe your app |
 
-## Example Conversations
+### Flows
 
-**Managing Templates:**
-> "List all my approved marketing templates"
->
-> "Create a template called `order_update` with a body that says 'Your order has been confirmed. Order number: {{1}}'"
->
-> "Delete the `old_promo` template"
+| Tool | Description |
+|------|-------------|
+| `list_flows` | List Flows |
+| `get_flow` | Get a Flow with status and validation errors |
+| `create_flow` | Create a Flow (inline JSON or clone) |
+| `update_flow_metadata` | Rename, recategorize or change the endpoint |
+| `update_flow_json` | Upload a new Flow JSON |
+| `publish_flow` | Publish a draft Flow |
+| `deprecate_flow` | Deprecate a published Flow |
+| `delete_flow` | Delete a draft Flow |
 
-**Managing Flows:**
-> "Show me all my flows and their statuses"
->
-> "Create a new customer support flow called `support_v2`"
->
-> "Update the flow JSON for flow ID 12345 with this definition: { ... }"
->
-> "Publish flow 12345"
+### Upgrading from 1.x
 
-**Sending Messages:**
-> "Send 'Hello!' to +15551234567"
->
-> "Send the `hello_world` template in English to +15551234567"
+- `send_image_message` was replaced by `send_media_message` (`type: "image"`).
+- `get_media_info` was renamed to `get_media_url`.
+- Node.js 20.12+ is required (inherited from meta-cloud-api 3.x).
 
 ## Development
 
@@ -174,30 +189,23 @@ claude mcp add whatsapp -- npx -y meta-cloud-api-mcp
 git clone https://github.com/froggy1014/meta-cloud-api-mcp.git
 cd meta-cloud-api-mcp
 npm install
+npm run typecheck
+npm test        # vitest, with the SDK mocked
 npm run build
 ```
 
-### Testing with MCP Inspector
+Try it interactively with the MCP Inspector:
 
 ```bash
 npx @modelcontextprotocol/inspector node dist/index.js
 ```
 
-Set environment variables in the Inspector UI, then browse and test all 31 tools interactively.
-
-## Requirements
-
-- **Node.js** 18 or later
-- **Meta Developer Account** with WhatsApp Business API access
-- **MCP-compatible client** (Claude Desktop, Claude Code, etc.)
-
 ## Related
 
-- [meta-cloud-api](https://github.com/froggy1014/meta-cloud-api) — The TypeScript SDK this server wraps
-- [meta-cloud-api docs](https://www.meta-cloud-api.xyz/) — SDK documentation
-- [Model Context Protocol](https://modelcontextprotocol.io) — MCP specification
-- [WhatsApp Cloud API](https://developers.facebook.com/docs/whatsapp/cloud-api) — Official Meta documentation
+- [meta-cloud-api](https://github.com/froggy1014/meta-cloud-api): the TypeScript SDK this server wraps
+- [Model Context Protocol](https://modelcontextprotocol.io)
+- [WhatsApp Cloud API docs](https://developers.facebook.com/documentation/business-messaging/whatsapp/overview/)
 
 ## License
 
-MIT - see [LICENSE](LICENSE) for details.
+MIT, see [LICENSE](LICENSE).

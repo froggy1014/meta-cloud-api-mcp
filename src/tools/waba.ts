@@ -1,91 +1,60 @@
+// Docs: https://developers.facebook.com/documentation/business-messaging/whatsapp/whatsapp-business-accounts/
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { getClient, getWabaId } from '../client.js';
-import { formatError } from '../utils/errors.js';
-import { formatSuccess } from '../utils/response.js';
+import type { ToolContext } from '../context.js';
+import { ToolInputError } from '../result.js';
+import { DESTRUCTIVE, defineTool, READ_ONLY, WRITE } from './define.js';
 
-export function registerWabaTools(server: McpServer) {
-    server.tool(
-        'get_waba_account',
-        'Get WhatsApp Business Account information — name, status, health, verification, messaging limits',
-        {
+export function registerWabaTools(server: McpServer, ctx: ToolContext): void {
+    defineTool(server, ctx, {
+        name: 'get_waba_account',
+        title: 'Get WABA account',
+        description:
+            'Get WhatsApp Business Account info: name, status, review and verification status, currency, timezone, limits.',
+        input: {
             fields: z
-                .array(
-                    z.enum([
-                        'id',
-                        'name',
-                        'timezone_id',
-                        'account_review_status',
-                        'auth_international_rate_eligibility',
-                        'business_verification_status',
-                        'country',
-                        'currency',
-                        'health_status',
-                        'status',
-                        'ownership_type',
-                        'message_template_namespace',
-                        'primary_business_location',
-                        'analytics',
-                        'is_enabled_for_insights',
-                        'is_shared_with_partners',
-                        'marketing_messages_lite_api_status',
-                        'marketing_messages_onboarding_status',
-                        'on_behalf_of_business_info',
-                        'primary_funding_id',
-                        'purchase_order_number',
-                        'whatsapp_business_manager_messaging_limit',
-                    ]),
-                )
+                .array(z.string().regex(/^[a-z_]+$/))
+                .min(1)
                 .optional()
-                .describe('Specific WABA account fields to retrieve'),
+                .describe('Fields to return, e.g. ["id","name","account_review_status","business_verification_status"]'),
         },
-        async ({ fields }) => {
-            try {
-                const result = await getClient().waba.getWabaAccount(fields);
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
+        annotations: READ_ONLY,
+        run: ({ fields }, c) => {
+            c.getBusinessAccountId();
+            return c.getClient().waba.getWabaAccount(fields as never);
         },
-    );
+    });
 
-    server.tool(
-        'subscribe_waba_webhook',
-        'Subscribe your app to WABA webhooks. Optionally override the callback URL and verify token.',
-        {
-            override_callback_uri: z
-                .string()
-                .optional()
-                .describe('Custom webhook callback URL (overrides app dashboard setting)'),
-            verify_token: z
-                .string()
-                .optional()
-                .describe('Verify token for webhook validation (required if override_callback_uri is set)'),
+    defineTool(server, ctx, {
+        name: 'subscribe_waba_webhook',
+        title: 'Subscribe app to WABA webhooks',
+        description:
+            'Subscribe your app to webhooks for the WABA, optionally overriding the callback URL for this WABA only.',
+        input: {
+            override_callback_uri: z.url().optional().describe('Callback URL overriding the app-level setting'),
+            verify_token: z.string().min(1).optional().describe('Verify token (required with override_callback_uri)'),
         },
-        async ({ override_callback_uri, verify_token }) => {
-            try {
-                const result = await getClient().waba.updateWabaSubscription({
-                    override_callback_uri: override_callback_uri ?? '',
-                    verify_token: verify_token ?? '',
-                });
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
+        annotations: { ...WRITE, idempotentHint: true },
+        run: ({ override_callback_uri, verify_token }, c) => {
+            if (override_callback_uri && !verify_token) {
+                throw new ToolInputError('verify_token is required when override_callback_uri is set.');
             }
+            c.getBusinessAccountId();
+            return c.getClient().waba.updateWabaSubscription({
+                ...(override_callback_uri && { override_callback_uri, verify_token }),
+            } as never);
         },
-    );
+    });
 
-    server.tool(
-        'unsubscribe_waba_webhook',
-        'Unsubscribe your app from WABA webhooks',
-        {},
-        async () => {
-            try {
-                const result = await getClient().waba.unsubscribeFromWaba();
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
+    defineTool(server, ctx, {
+        name: 'unsubscribe_waba_webhook',
+        title: 'Unsubscribe app from WABA webhooks',
+        description: 'Stop delivering this WABA’s webhooks to your app.',
+        input: {},
+        annotations: DESTRUCTIVE,
+        run: (_args, c) => {
+            c.getBusinessAccountId();
+            return c.getClient().waba.unsubscribeFromWaba();
         },
-    );
+    });
 }

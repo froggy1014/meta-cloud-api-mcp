@@ -1,94 +1,78 @@
+// Docs: https://developers.facebook.com/documentation/business-messaging/whatsapp/business-phone-numbers/media/
+import { readFile, stat, writeFile } from 'node:fs/promises';
+import { basename } from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { getClient } from '../client.js';
-import { formatError } from '../utils/errors.js';
-import { formatSuccess } from '../utils/response.js';
+import type { ToolContext } from '../context.js';
+import { ToolInputError } from '../result.js';
+import { DESTRUCTIVE, defineTool, READ_ONLY, WRITE } from './define.js';
 
-export function registerMediaTools(server: McpServer) {
-    server.tool(
-        'get_media_info',
-        'Get metadata for a media object by ID — returns URL, MIME type, file size, and SHA-256 hash',
-        {
-            media_id: z.string().describe('The media ID to retrieve info for'),
-        },
-        async ({ media_id }) => {
-            try {
-                const result = await getClient().media.getMediaById(media_id);
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
-        },
-    );
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
-    server.tool(
-        'upload_media',
-        'Upload a media file to WhatsApp. Returns a media ID that can be used in messages. Supported: image (5MB), video (16MB), audio (16MB), document (100MB), sticker (500KB).',
-        {
-            file_path: z
-                .string()
-                .describe('Absolute path to the file to upload'),
+export function registerMediaTools(server: McpServer, ctx: ToolContext): void {
+    defineTool(server, ctx, {
+        name: 'upload_media',
+        title: 'Upload media',
+        description:
+            'Upload a local file to WhatsApp and get a media ID for send_media_message. Limits: image 5MB, video/audio 16MB, document 100MB, sticker 500KB. Media IDs expire after 30 days.',
+        input: {
+            file_path: z.string().min(1).describe('Absolute path of the local file to upload'),
             mime_type: z
                 .string()
-                .describe(
-                    'MIME type of the file (e.g. "image/jpeg", "video/mp4", "application/pdf", "audio/ogg")',
-                ),
-            file_name: z.string().describe('File name with extension (e.g. "photo.jpg")'),
+                .regex(/^[\w.+-]+\/[\w.+-]+$/, 'Expected a MIME type such as image/jpeg')
+                .describe('MIME type, e.g. "image/jpeg", "video/mp4", "application/pdf", "audio/ogg"'),
+            file_name: z.string().min(1).optional().describe('File name to upload as (defaults to the path basename)'),
         },
-        async ({ file_path, mime_type, file_name }) => {
-            try {
-                const fs = await import('node:fs');
-                const buffer = fs.readFileSync(file_path);
-                const file = new File([buffer], file_name, { type: mime_type });
-                const result = await getClient().media.uploadMedia(file);
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
+        annotations: WRITE,
+        run: async ({ file_path, mime_type, file_name }, c) => {
+            const info = await stat(file_path).catch(() => {
+                throw new ToolInputError(`File not found: ${file_path}`);
+            });
+            if (!info.isFile()) throw new ToolInputError(`Not a file: ${file_path}`);
+            if (info.size > MAX_UPLOAD_BYTES) throw new ToolInputError('File is larger than the 100MB upload limit.');
+            const buffer = await readFile(file_path);
+            const file = new File([buffer], file_name ?? basename(file_path), { type: mime_type });
+            return c.getClient().media.uploadMedia(file);
         },
-    );
+    });
 
-    server.tool(
-        'delete_media',
-        'Delete a media file from WhatsApp servers by media ID',
-        {
-            media_id: z.string().describe('The media ID to delete'),
+    defineTool(server, ctx, {
+        name: 'get_media_url',
+        title: 'Get media URL',
+        description:
+            'Get the short-lived download URL, MIME type, size and SHA-256 of a media ID (uploaded or received in a webhook). The URL needs the access token, so use download_media to fetch it.',
+        input: {
+            media_id: z.string().min(1).describe('Media ID'),
         },
-        async ({ media_id }) => {
-            try {
-                const result = await getClient().media.deleteMedia(media_id);
-                return formatSuccess(result);
-            } catch (error) {
-                return formatError(error);
-            }
-        },
-    );
+        annotations: READ_ONLY,
+        run: ({ media_id }, c) => c.getClient().media.getMediaById(media_id),
+    });
 
-    server.tool(
-        'download_media',
-        'Download media content from a WhatsApp media URL. Use get_media_info first to obtain the URL.',
-        {
-            media_url: z
-                .string()
-                .describe('The media download URL (obtained from get_media_info)'),
-            save_path: z
-                .string()
-                .describe('Absolute file path to save the downloaded media'),
+    defineTool(server, ctx, {
+        name: 'download_media',
+        title: 'Download media',
+        description: 'Download media from a URL returned by get_media_url and save it to a local file.',
+        input: {
+            media_url: z.url().describe('Download URL from get_media_url'),
+            save_path: z.string().min(1).describe('Absolute path to write the file to'),
         },
-        async ({ media_url, save_path }) => {
-            try {
-                const blob = await getClient().media.downloadMedia(media_url);
-                const fs = await import('node:fs');
-                const buffer = Buffer.from(await blob.arrayBuffer());
-                fs.writeFileSync(save_path, buffer);
-                return formatSuccess({
-                    success: true,
-                    saved_to: save_path,
-                    size_bytes: buffer.length,
-                });
-            } catch (error) {
-                return formatError(error);
-            }
+        annotations: WRITE,
+        run: async ({ media_url, save_path }, c) => {
+            const blob = await c.getClient().media.downloadMedia(media_url);
+            const buffer = Buffer.from(await blob.arrayBuffer());
+            await writeFile(save_path, buffer);
+            return { success: true, saved_to: save_path, size_bytes: buffer.length };
         },
-    );
+    });
+
+    defineTool(server, ctx, {
+        name: 'delete_media',
+        title: 'Delete media',
+        description: 'Delete an uploaded media file from WhatsApp servers.',
+        input: {
+            media_id: z.string().min(1).describe('Media ID to delete'),
+        },
+        annotations: DESTRUCTIVE,
+        run: ({ media_id }, c) => c.getClient().media.deleteMedia(media_id),
+    });
 }
